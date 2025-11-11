@@ -4,13 +4,16 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse, urljoin
 import logging
 from thirdparty.external_service import call_external_service
+from typing import Optional, Callable
 
 class SitemapScanner:
     """
     Model untuk melakukan scraping dan analisis sitemap website
     """
     
-    def __init__(self, base_url):
+    def __init__(self, 
+                 base_url: str,
+                 on_output: Optional[Callable] = None):
         """
         Inisialisasi scanner dengan URL dasar
         
@@ -18,6 +21,7 @@ class SitemapScanner:
             base_url (str): URL dasar website yang akan di-scan
         """
         self.base_url = base_url
+        self.on_output = on_output
         self.visited_urls = set()
         self.sitemap_urls = set()
         self.endpoints = []
@@ -27,6 +31,15 @@ class SitemapScanner:
         }
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
+        
+    def _log(self, message: str):
+        """Helper untuk logging dengan callback"""
+        print(message)
+        if self.on_output:
+            try:
+                self.on_output(message)
+            except Exception as e:
+                print(f"[SitemapScanner] on_output callback error: {e}")
     
     def fetch_sitemap(self):
         """
@@ -238,7 +251,8 @@ class SitemapScanner:
         
         # Crawl each discovered URL
         crawled_urls = []
-        for url in all_urls[:10]:  # Limit untuk demo
+        for url in all_urls:  # Limit untuk demo
+            self._log(url)
             found_urls = self.crawl_page(url, depth=1)
             crawled_urls.extend(found_urls)
         
