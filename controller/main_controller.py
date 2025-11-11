@@ -1,4 +1,13 @@
+from model.JobsCrawl import create_job_crawl
+from utils.api_response import APP_ERROR_CODES
+from utils.api_response import error_response, success_response
+from model.sitemap_model import SitemapScanner
 from model.data_model import process_data
+from model.Jobs import create_job, update_job, get_job
+import threading
+import uuid
+from typing import Dict
+from utils.socket_handlers import send_ws_event
 
 def process_request(payload):
     """
@@ -12,9 +21,98 @@ def process_request(payload):
     """
     # Validate payload
     if not payload:
-        return {"error": "Empty payload"}
+        return error_response("Empty Payload", http_status=400, app_code=APP_ERROR_CODES["INVALID_INPUT"])
     
     # Process data using model
     result = process_data(payload)
     
     return result
+
+# scan_domain function removed as per request (using Jobs model with background job API)
+
+
+# -----------------------------
+# Background job utilities
+# -----------------------------
+
+JobsStore: Dict[str, Dict] = {}
+
+def _run_scan_job(job_id: str, domain: str):
+    """Internal worker to execute scan in a background thread and update JobsStore."""
+    try:
+        # Update DB status to running
+        update_job(job_id, "running")
+        JobsStore[job_id]["status"] = "running"
+        JobsStore[job_id]["progress"] = 10
+        
+        def on_output_callback(job_id, url):
+            create_job_crawl(job_id, url)
+
+        scanner = SitemapScanner(
+            domain,
+            on_output=on_output_callback,
+        )
+        JobsStore[job_id]["progress"] = 30
+
+        results = scanner.run_scan()
+        JobsStore[job_id]["progress"] = 90
+
+        JobsStore[job_id]["result"] = results
+        JobsStore[job_id]["status"] = "done"
+        # Update DB status to finish
+        update_job(job_id, "finish")
+        JobsStore[job_id]["progress"] = 100
+        send_ws_event(
+            "scan_result",
+            {
+                "job_id": job_id,
+                "message": "Job Id Telah selesai, dan sukses"
+            }
+        )
+    except Exception as e:
+        # Update DB status to error
+        update_job(job_id, "error")
+        send_ws_event(
+            "scan_result",
+            {
+                "job_id": job_id,
+                "message": "Job Id Telah selesai, dan sepertinya ada kegagalan"
+            }
+        )
+        JobsStore[job_id]["status"] = "error"
+        JobsStore[job_id]["error"] = str(e)
+
+def start_scan_job(payload: dict):
+    """Start a background scan job and return a job_id immediately."""
+    if not isinstance(payload, dict) or "domain" not in payload or not payload.get("domain"):
+        return error_response("Invalid input: 'domain' is required", http_status=400, app_code=APP_ERROR_CODES["INVALID_INPUT"])
+
+    domain = payload["domain"]
+    job_id = uuid.uuid4().hex
+    JobsStore[job_id] = {"status": "pending", "progress": 0, "result": None}
+    # Create job in DB
+    create_job(job_id, domain)
+
+    t = threading.Thread(target=_run_scan_job, args=(job_id, domain), daemon=True)
+    t.start()
+
+    # Return 202 Accepted to indicate job started
+    return success_response(data={"job_id": job_id}, message="Scan started", http_status=202, meta={"status": "accepted"})
+
+def get_scan_status(job_id: str):
+    # Prefer DB status; combine with in-memory progress if exists
+    job_row = get_job(job_id)
+    if not job_row:
+        return error_response("Job not found", http_status=404, app_code=APP_ERROR_CODES["NOT_FOUND"])
+    mem = JobsStore.get(job_id, {})
+    progress = mem.get("progress", 0)
+    return success_response(data={"status": job_row.status, "progress": progress}, message="Scan status", http_status=200)
+
+def get_scan_result(job_id: str):
+    job_row = get_job(job_id)
+    if not job_row:
+        return error_response("Job not found", http_status=404, app_code=APP_ERROR_CODES["NOT_FOUND"])
+    mem = JobsStore.get(job_id)
+    if not mem or mem.get("status") != "done":
+        return error_response("Scan not completed", http_status=409, app_code=APP_ERROR_CODES["SCAN_FAILED"])
+    return success_response(data=mem["result"], message="Scan result", http_status=200)
