@@ -7,7 +7,7 @@ class JobCrawl(Base):
     __tablename__ = "jobs_crawl"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    job_id = Column(String(150), unique=True, index=True)
+    job_id = Column(String(150), index=True)
     url = Column(String(150), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.now)
     
