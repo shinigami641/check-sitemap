@@ -1,4 +1,5 @@
 from model.JobsCrawl import create_job_crawl, get_all_job_crawl
+from model.JobsVuln import create_job_vuln, get_all_job_vuln
 from utils.api_response import APP_ERROR_CODES
 from utils.api_response import error_response, success_response
 from model.sitemap_model import SitemapScanner
@@ -75,6 +76,23 @@ def _run_scan_job(job_id: str, domain: str):
         JobsStore[job_id]["progress"] = 90
 
         JobsStore[job_id]["result"] = results
+        # Persist vulnerability findings to DB
+        try:
+            vulns = results.get("potential_vulnerabilities") or []
+            for v in vulns:
+                create_job_vuln(
+                    job_id,
+                    url=v.get("url"),
+                    source_page=v.get("source_page"),
+                    method=v.get("method"),
+                    field=v.get("field"),
+                    payload=v.get("payload"),
+                    evidence=v.get("evidence"),
+                    vuln_type=v.get("vuln_type") or "sqli",
+                )
+        except Exception:
+            # Jangan blok proses jika insert vuln gagal
+            pass
         JobsStore[job_id]["status"] = "done"
         # Update DB status to finish
         update_job(job_id, "finish")
@@ -84,7 +102,8 @@ def _run_scan_job(job_id: str, domain: str):
             {
                 "job_id": job_id,
                 "message": "Job Id Telah selesai, dan sukses"
-            }
+            },
+            namespace="/notifications"
         )
     except Exception as e:
         # Update DB status to error
@@ -94,7 +113,8 @@ def _run_scan_job(job_id: str, domain: str):
             {
                 "job_id": job_id,
                 "message": "Job Id Telah selesai, dan sepertinya ada kegagalan"
-            }
+            },
+            namespace="/notifications"
         )
         JobsStore[job_id]["status"] = "error"
         JobsStore[job_id]["error"] = str(e)
@@ -109,6 +129,14 @@ def start_scan_job(payload: dict):
     JobsStore[job_id] = {"status": "pending", "progress": 0, "result": None}
     # Create job in DB
     create_job(job_id, domain)
+    send_ws_event(
+        "scan_result",
+        {
+            "job_id": job_id,
+            "message": "Silahkan Menunggu Job Selesai"
+        },
+        namespace="/notifications"
+    )
 
     t = threading.Thread(target=_run_scan_job, args=(job_id, domain), daemon=True)
     t.start()
@@ -159,3 +187,19 @@ def get_scan_all_crawl(job_id: str):
     } for c in jobs] if jobs else []
     # Always return 200 with possibly empty list; frontend will treat empty list as partial progress
     return success_response(data=crawls, message="Scan all crawl data", http_status=200, meta={"count": len(crawls), "job_id": job_id})
+
+def get_scan_all_vuln(job_id: str):
+    items = get_all_job_vuln(job_id)
+    vulns = [{
+        "id": v.id,
+        "job_id": v.job_id,
+        "url": v.url,
+        "source_page": v.source_page,
+        "method": v.method,
+        "field": v.field,
+        "payload": v.payload,
+        "evidence": v.evidence,
+        "vuln_type": v.vuln_type,
+        "created_at": _to_iso(v.created_at),
+    } for v in items] if items else []
+    return success_response(data=vulns, message="Scan all vulnerability data", http_status=200, meta={"count": len(vulns), "job_id": job_id})
