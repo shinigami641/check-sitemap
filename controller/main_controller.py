@@ -1,9 +1,9 @@
-from model.JobsCrawl import create_job_crawl
+from model.JobsCrawl import create_job_crawl, get_all_job_crawl
 from utils.api_response import APP_ERROR_CODES
 from utils.api_response import error_response, success_response
 from model.sitemap_model import SitemapScanner
 from model.data_model import process_data
-from model.Jobs import create_job, update_job, get_job
+from model.Jobs import create_job, update_job, get_job, get_all_job
 import threading
 import uuid
 from typing import Dict
@@ -37,6 +37,13 @@ def process_request(payload):
 
 JobsStore: Dict[str, Dict] = {}
 
+# Utility: safely convert datetime to ISO string
+def _to_iso(dt):
+    try:
+        return dt.isoformat() if dt is not None else None
+    except Exception:
+        return None
+
 def _run_scan_job(job_id: str, domain: str):
     """Internal worker to execute scan in a background thread and update JobsStore."""
     try:
@@ -44,9 +51,19 @@ def _run_scan_job(job_id: str, domain: str):
         update_job(job_id, "running")
         JobsStore[job_id]["status"] = "running"
         JobsStore[job_id]["progress"] = 10
-        
-        def on_output_callback(job_id, url):
-            create_job_crawl(job_id, url)
+
+        # Callback yang dipanggil oleh SitemapScanner._log(url)
+        # Signature on_output(message) -> di sini message adalah URL
+        def on_output_callback(message):
+            try:
+                url = str(message)
+                # Simpan setiap URL hasil crawling ke DB
+                create_job_crawl(job_id, url)
+                # Sedikit progres incremental (best effort)
+                JobsStore[job_id]["progress"] = min(90, JobsStore[job_id].get("progress", 10) + 5)
+            except Exception:
+                # Abaikan error insert agar scanning tetap berjalan
+                pass
 
         scanner = SitemapScanner(
             domain,
@@ -116,3 +133,29 @@ def get_scan_result(job_id: str):
     if not mem or mem.get("status") != "done":
         return error_response("Scan not completed", http_status=409, app_code=APP_ERROR_CODES["SCAN_FAILED"])
     return success_response(data=mem["result"], message="Scan result", http_status=200)
+
+def get_scan_all_data():
+    jobs = get_all_job("")
+    # Serialize SQLAlchemy model objects to plain dicts (safe for None datetimes)
+    jobs_data = [{
+        "id": j.id,
+        "job_id": j.job_id,
+        "domain": j.domain,
+        "status": j.status,
+        "created_at": _to_iso(j.created_at),
+        "updated_at": _to_iso(j.updated_at),
+        "finish_at": _to_iso(j.finish_at),
+    } for j in jobs] if jobs else []
+    return success_response(data=jobs_data, message="Scan all data", http_status=200, meta={"count": len(jobs_data)})
+
+def get_scan_all_crawl(job_id: str):
+    jobs = get_all_job_crawl(job_id)
+    # Serialize to dicts safe for JSON
+    crawls = [{
+        "id": c.id,
+        "job_id": c.job_id,
+        "url": c.url,
+        "created_at": _to_iso(c.created_at),
+    } for c in jobs] if jobs else []
+    # Always return 200 with possibly empty list; frontend will treat empty list as partial progress
+    return success_response(data=crawls, message="Scan all crawl data", http_status=200, meta={"count": len(crawls), "job_id": job_id})
