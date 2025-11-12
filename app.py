@@ -1,11 +1,19 @@
+# --- Tambahkan ini di paling atas ---
+import eventlet
+eventlet.monkey_patch()
+# -----------------------------------
+
 from view.socket.api import init_socket
 from utils.api_response import APP_ERROR_CODES
 from utils.api_response import error_response
 from flask import Flask
 from view.routes import register_blueprints
 from config.socket import socketio
+from flask_cors import CORS
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/*": {"origins": "*"}})
 
 # Register all routes
 register_blueprints(app)
