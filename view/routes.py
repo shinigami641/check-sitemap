@@ -1,3 +1,5 @@
+from controller.main_controller import get_scan_all_crawl
+from controller.main_controller import get_scan_all_data
 from utils.api_response import success_response
 from controller.main_controller import process_request, start_scan_job, get_scan_status, get_scan_result
 from flask import Blueprint, request, jsonify, current_app
@@ -49,3 +51,11 @@ def handle_scan_status(job_id):
 @main_bp.route('/scan/result/<job_id>', methods=['GET'])
 def handle_scan_result(job_id):
     return get_scan_result(job_id)
+
+@main_bp.route('/scan/all', methods=['GET'])
+def handle_scan_all():
+    return get_scan_all_data()
+
+@main_bp.route('/scan/all/crawl/<job_id>', methods=['GET'])
+def handle_scan_all_crawl(job_id):
+    return get_scan_all_crawl(job_id)
