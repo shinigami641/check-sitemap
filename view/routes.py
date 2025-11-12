@@ -1,8 +1,8 @@
-from controller.main_controller import get_scan_all_crawl
+from controller.main_controller import get_scan_all_crawl, get_scan_all_vuln
 from controller.main_controller import get_scan_all_data
 from utils.api_response import success_response
 from controller.main_controller import process_request, start_scan_job, get_scan_status, get_scan_result
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app  # type: ignore
 
 main_bp = Blueprint('main', __name__, url_prefix='/api')
 
@@ -59,3 +59,7 @@ def handle_scan_all():
 @main_bp.route('/scan/all/crawl/<job_id>', methods=['GET'])
 def handle_scan_all_crawl(job_id):
     return get_scan_all_crawl(job_id)
+
+@main_bp.route('/scan/all/vuln/<job_id>', methods=['GET'])
+def handle_scan_all_vuln(job_id):
+    return get_scan_all_vuln(job_id)
