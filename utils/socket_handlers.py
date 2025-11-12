@@ -21,6 +21,14 @@ class NotificationsNamespace(Namespace):
         """
         print("[WS] Received from client:", data)
         emit('server_response', {'ok': True})
+        # Debug: kirimkan contoh event 'scan_result' agar klien bisa memverifikasi listener-nya
+        try:
+            emit('scan_result', {
+                'job_id': data.get('job_id') or 'debug',
+                'message': data.get('message') or 'Debug: scan_result from server'
+            })
+        except Exception as e:
+            print('[WS] Failed to emit debug scan_result:', e)
 
     def on_join_room(self, data):
         """
@@ -43,16 +51,7 @@ class NotificationsNamespace(Namespace):
             emit("left", {"room": room})
 
 
-def send_ws_event(event_name, data=None, namespace='/notifications'):
-    """
-    Emit Socket.IO event ke namespace dan room tertentu.
-
-    Args:
-        event_name (str): nama event
-        data (dict): data yang dikirim
-        namespace (str): namespace, default '/notifications'
-        room (str): optional room target
-    """
+def send_ws_event(event_name, data=None, namespace='/notifications', room=None):
     from config.socket import socketio  # import socketio instance
 
     if data is None:
