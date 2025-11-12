@@ -34,3 +34,10 @@ export async function getAllScans() {
   if (!res.ok || json.status !== 1) throw new Error(json.message || 'Failed to get scans');
   return json?.data || [];
 }
+
+export async function getVulnByJobId(jobId) {
+  const res = await fetch(`${API_CONFIG.baseURL}/api/scan/all/vuln/${jobId}`);
+  const json = await res.json();
+  if (!res.ok || json.status !== 1) throw new Error(json.message || 'Failed to get vulnerability list');
+  return json?.data || [];
+}
