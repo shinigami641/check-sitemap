@@ -9,24 +9,64 @@ export default function NavBar({ active = 'scanner', onTabChange = () => {} }) {
   useEffect(() => {
     // Connect to Socket.IO namespace '/notifications'
     const socket = io('http://localhost:5000/notifications', {
-      transports: ['websocket'],
+      // Izinkan fallback ke polling jika websocket tidak tersedia
+      transports: ['websocket', 'polling'],
+      path: '/socket.io',
       reconnection: true,
       reconnectionDelay: 1000,
       reconnectionAttempts: 5,
+      withCredentials: false,
     })
     socketRef.current = socket
 
     socket.on('connect', () => setWsConnected(true))
     socket.on('disconnect', () => setWsConnected(false))
+    socket.on('connect_error', (err) => {
+      console.error('[WS] connect_error', err)
+    })
+
+    // Debug: log semua event yang diterima
+    socket.onAny((event, ...args) => {
+      console.log('[WS] onAny', event, ...args)
+    })
+
+    // Kirim pesan ke server untuk mengetes round-trip
+    socket.emit('client_message', { message: 'hello from FE' })
+    socket.on('server_response', (data) => {
+      console.log('[WS] server_response', data)
+      setNotifications(prev => [{
+        job_id: data?.job_id || '-',
+        message: 'Connected to notification server',
+        ts: new Date().toISOString()
+      }, ...prev].slice(0, 50))
+      setShowDropdown(true)
+      setTimeout(() => setShowDropdown(false), 3000)
+    })
 
     // Listen event: scan_result
     socket.on('scan_result', (payload) => {
       // payload: { job_id, message }
+      console.log(payload)
       setNotifications(prev => [{
         job_id: payload?.job_id,
         message: payload?.message || 'Scan result received',
         ts: new Date().toISOString()
       }, ...prev].slice(0, 50))
+      // Auto-popup dropdown beberapa detik saat ada notifikasi baru
+      setShowDropdown(true)
+      setTimeout(() => setShowDropdown(false), 6000)
+    })
+
+    // Listener untuk broadcast sederhana dari server saat app.py start
+    socket.on('server_broadcast', (payload) => {
+      console.log('[WS] server_broadcast', payload)
+      setNotifications(prev => [{
+        job_id: payload?.job_id || '-',
+        message: payload?.message || 'Server broadcast',
+        ts: new Date().toISOString()
+      }, ...prev].slice(0, 50))
+      setShowDropdown(true)
+      setTimeout(() => setShowDropdown(false), 4000)
     })
 
     return () => {
