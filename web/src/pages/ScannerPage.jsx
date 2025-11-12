@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ScannerForm from '../components/ScannerForm'
 import ProgressBar from '../components/ProgressBar'
-import ResultsTable from '../components/ResultsTable'
+import CrawlList from '../components/CrawlList'
 import StatCards from '../components/StatCards'
-import { startScan } from '../../config/api'
+import { startScan, getScanStatus, getCrawlByJobId } from '../../config/api'
 
 const demoRows = [
   { url: 'https://www.google.com/', status: 'Safe', risk: 'Safe', details: 'Homepage does not contain query parameters for assessment.' },
@@ -12,28 +12,59 @@ const demoRows = [
 
 export default function ScannerPage() {
   const [progressStep, setProgressStep] = useState(0)
+  const [jobId, setJobId] = useState(null)
+  const [status, setStatus] = useState('idle')
   const [rows, setRows] = useState([])
   const [stats, setStats] = useState({ total: 0, vulnerable: 0, safe: 0 })
+  const timerRef = useRef(null)
+
+  // Polling helper
+  const startPolling = (jid) => {
+    clearInterval(timerRef.current)
+    timerRef.current = setInterval(async () => {
+      try {
+        const st = await getScanStatus(jid)
+        setStatus(st.status)
+        const step = st.progress < 34 ? 1 : st.progress < 67 ? 2 : 3
+        setProgressStep(step)
+        // Stop polling when job has finished or errored
+        if (st.status === 'finish' || st.status === 'done' || st.status === 'error') {
+          clearInterval(timerRef.current)
+          setProgressStep(3)
+        }
+      } catch {}
+      try {
+        const list = await getCrawlByJobId(jid)
+        setRows(list)
+        setStats({ total: list.length, vulnerable: 0, safe: list.length })
+      } catch {}
+    }, 2000)
+  }
+
+  useEffect(() => {
+    return () => clearInterval(timerRef.current)
+  }, [])
 
   const handleStart = async (domain) => {
+    // reset state
     setRows([])
     setStats({ total: 0, vulnerable: 0, safe: 0 })
-    // Simulasi progress 3 step
+    setStatus('pending')
     setProgressStep(1)
-    await new Promise(r => setTimeout(r, 800))
-    setProgressStep(2)
-    await new Promise(r => setTimeout(r, 800))
-    setProgressStep(3)
-    await new Promise(r => setTimeout(r, 800))
-
-    // Contoh panggilan API; saat backend siap, gunakan hasil nyata
+    // call backend
     try {
-      await startScan(domain)
-    } catch {}
-    const data = demoRows
-    setRows(data)
-    setStats({ total: data.length, vulnerable: 0, safe: data.length })
-    setProgressStep(0)
+      const res = await startScan(domain)
+      const jid = res?.job_id
+      if (jid) {
+        setJobId(jid)
+        setStatus('running')
+        setProgressStep(1)
+        startPolling(jid)
+      }
+    } catch (e) {
+      setStatus('error')
+      clearInterval(timerRef.current)
+    }
   }
 
   return (
@@ -51,18 +82,18 @@ export default function ScannerPage() {
 
       <ScannerForm onStart={handleStart} />
 
-      {progressStep > 0 && (
+      {status !== 'idle' && (
         <div className="mt-4">
           <ProgressBar step={progressStep} total={3} />
         </div>
       )}
 
-      {rows.length > 0 && (
-        <div className="mt-6">
-          <ResultsTable rows={rows} />
-          <StatCards total={stats.total} vulnerable={stats.vulnerable} safe={stats.safe} />
-        </div>
-      )}
+      <div className="mt-6">
+        <CrawlList items={rows} loading={status !== 'finish' && status !== 'done' && status !== 'error' && status !== 'idle'} />
+        {rows.length > 0 && (
+          <StatCards total={stats.total} vulnerable={0} safe={stats.safe} />
+        )}
+      </div>
     </div>
   )
 }
